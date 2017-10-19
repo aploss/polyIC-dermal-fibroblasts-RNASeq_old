@@ -1,0 +1,127 @@
+---
+title: "Pseudoviolin plots"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+require(knitr)
+```
+
+## Purpose
+
+Generating pseudoviolin plots of the differentially expressed genes across all the species used in this study. 
+
+```{r pkgs, message=FALSE, warning=FALSE}
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(reshape2)
+```
+
+Upload differential gene expression files 
+```{r files}
+DGE_files <- "DGE_per_species"
+sampleFiles <- basename(Sys.glob(file.path(DGE_files,  "*results.txt")))
+sampleNames <- sub('-treated_vs_mock_analysis_results.txt', '', sampleFiles)
+length(sampleFiles)
+species_match <- str_match(sampleFiles, '(\\w+[\\s]?\\w+)')
+species <- species_match[,2]
+species
+
+output_dir <- "Pseudoviolin_output"
+dir.create(output_dir, showWarnings = FALSE)
+```
+
+Organize the data and select only genes that have an ENTREZ ID (since this is one of the requirements for performing the pathway analysis) AND a padj <= 0.05 to use for generating
+the pseudoviolin plots . 
+```{r pseudoviolin data}
+data_pseudoviolins <- function(files) {     
+  d <- read.delim(files)
+  dd <-dplyr::select(d, log2FoldChange, padj, ENTREZID) %>%
+    na.omit() %>%
+    dplyr::filter(padj <= 0.05) %>%
+    dplyr::distinct(ENTREZID, .keep_all = TRUE) %>%
+    dplyr::select(log2FoldChange) 
+}
+
+p <- lapply(file.path(DGE_files, sampleFiles), data_pseudoviolins)
+names(p) <- species
+p_renamed <- lapply(names(p), function(x) setNames(p[[x]], x) )
+names(p_renamed) <- species
+
+p_renamed.m <- lapply(p_renamed, melt)
+all_combined <- data.table::rbindlist(p_renamed.m)
+all_combined$variable <- factor(all_combined$variable, 
+                                levels = c("Human", "Chimpanzee", "Bonobo", "Gorilla", 
+                                           "Orangutan", "Olive baboon", "Rhesus macaque", 
+                                           "Pigtailed macaque", "Squirrel monkey","Mouse"))
+
+##Get the number of values (i.e. the genes included in the pseudoviolin plots) for each 
+##species. 
+freq_numbers <- count(all_combined, variable)
+freq_numbers
+
+##Now if wanting to see how many genes included in the pseudoviolin plots have a ##log2FoldChange >= 1 or <= -1.
+p_greater <- lapply(p, function(x) x[x[, 1] >= 1, ])
+sapply(p_greater, length)
+
+p_lesser <- lapply(p, function(x) x[x[, 1] <= -1, ])
+sapply(p_lesser, length)
+
+
+
+```
+
+Plotting the human and NHP plots
+```{r plotting}
+
+all_plot <- ggplot(all_combined, aes(x = variable, y = value, fill= variable, color=variable)) + geom_point() 
+total_plot <- all_plot + geom_dotplot(binwidth=.07, binaxis = "y", stackdir="center", dotsize = 0.20) + 
+  xlab("") + ylab ("log2(fold change)") + 
+  theme(panel.background = element_rect(fill = "white"), 
+        panel.grid.major = element_line(colour = "black")) +
+  theme(axis.ticks.x=element_blank(), axis.text.x = element_blank(), 
+        axis.text.y = element_text(size = rel(2)), axis.title.y = element_text(size = rel(2)),
+        legend.position = "none") + ylim(-5.2, 12) +
+  scale_color_manual(values= c("dodgerblue4", "dodgerblue3", "dodgerblue2", "dodgerblue1", "deepskyblue", "darkgreen", "forestgreen", "darkolivegreen3", "purple", "magenta")) +
+  scale_fill_manual(values= c("dodgerblue4", "dodgerblue3", "dodgerblue2", "dodgerblue1", "deepskyblue", "darkgreen", "forestgreen", "darkolivegreen3", "purple", "magenta")) 
+total_plot
+ggsave(filename = file.path(output_dir, paste(Sys.Date(), "all species pseudoviolin.png")),
+       plot = total_plot, dpi = 300, width = 17, height = 6, units = "in", device = "png")
+```
+
+Taking the pseudoviolin plot data and making files of all the transcripts for each species as well as a separate file giving the top 50 or the top 10 transcripts that had the highest increase in expression between mock and polyI:C transfection. 
+```{r }
+
+tables_pseudoviolins <- function(files) {     
+  d <- read.delim(files)
+  dd <-dplyr::select(d, log2FoldChange, padj, ENTREZID, SYMBOL) %>%
+    na.omit() %>%
+    dplyr::filter(padj <= 0.05) %>%
+    arrange(desc(log2FoldChange)) 
+}
+
+data_tables <- lapply(file.path(DGE_files, sampleFiles), tables_pseudoviolins)
+names(data_tables) <- species
+
+for (i in names(data_tables)){
+  filename <- paste(i, "pseudoviolin gene list", sep="")
+  write.table(data_tables[[i]], file = file.path(output_dir, filename),row.names=FALSE,sep="\t",quote=FALSE)
+}
+
+topten <- lapply(data_tables, '[', 1:10,)
+topten_df <- do.call("cbind", topten) %>%
+  select(ends_with("SYMBOL"))
+topten_df
+write.table(topten_df, file = file.path(output_dir, paste(Sys.Date(), "top10allspecies.txt")), row.names=FALSE, sep="\t", quote=FALSE)
+
+topfifty <- lapply(data_tables, '[', 1:50,)
+topfifty_df <- do.call("cbind", topfifty) %>%
+  select(ends_with("SYMBOL"))
+write.table(topfifty_df, file = file.path(output_dir, paste(Sys.Date(), "top50allspecies.txt")), row.names=FALSE, sep="\t", quote=FALSE)
+
+```
+
+```{r session info}
+sessionInfo()
+```

@@ -1,0 +1,152 @@
+---
+title: "Bonobo_DGE"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+require(knitr)
+```
+
+##Purpose: 
+
+To determine the differential gene expression in primary bonobo dermal fibroblasts transfected with 0.5 ug polyI:C for 24 h versus those mock transfected.
+
+```{r pkgs, message=FALSE, warning=FALSE}
+library(DESeq2)
+library(gplots)
+library(dplyr)
+library(RColorBrewer)
+library(stringr)
+library(genefilter)
+library(data.table)
+library(genefilter)
+```
+
+Upload gene count files and generate a table of the samples broken up by donor ID, replicate designation, and treatment (polyI:C treated or mock).
+```{r files, message = FALSE}
+data_dir <- "Compiled_by_species/Bonobo/data"
+output_dir <- "DGE_per_species"
+getwd()
+## File list
+sampleFiles <- basename(Sys.glob(file.path(data_dir, "*Gene_counts.tabular")))
+sampleFiles
+
+## Create table of samples with donor, treatment, and replicate information
+sampleNames <- sampleFiles %>% str_replace("_Gene.counts.tabluar", "") %>% str_replace("__htseq-count", "") %>% str_replace("^[0-9]*_", "")
+sampleNames
+sampleDonor <- sapply(strsplit(sampleNames, split = '_', fixed = TRUE), function(x) (x[1]))
+sampleTreatment <- sapply(strsplit(sampleNames, split = '_', fixed = TRUE), function(x) (x[2]))
+sampleReplicate <- sapply(strsplit(sampleNames, split = '_', fixed = TRUE), function(x) (x[3]))
+
+sampleTable <- data.frame(sampleName = sampleNames, fileName = sampleFiles, donor = sampleDonor, treatment = sampleTreatment, replicate = sampleReplicate)
+sampleTable
+
+## Use DESeq2 to examine count data
+dds <- DESeqDataSetFromHTSeqCount(sampleTable = sampleTable, directory = data_dir, design = ~ donor + treatment)
+dds
+```
+
+```{r Experimental design and normalizing samples}
+
+##Interested in comparing treated versus mock
+contrast <- c("treatment", "treated", "mock")
+
+##How we want the output file named
+output_basename <- sprintf("%s-%s_vs_%s_analysis", "Bonobo", contrast[2], contrast[3])
+
+##Determining size factor for each column
+dds <- estimateSizeFactors(dds)
+dds@colData
+
+```
+
+```{r Dispersion Estimates}
+
+dds <- estimateDispersions(dds)
+plotDispEsts(dds, main=sprintf("%s Dispersion Estimates", output_basename))
+
+```
+
+```{r Differential expression}
+
+dds <- nbinomWaldTest(dds)
+res <- results(dds, contrast=contrast)
+
+sum(res$padj <= 0.05, na.rm=TRUE)
+
+sum(res$padj <= 0.1, na.rm=TRUE)
+
+res <- res[order(res$padj, -abs(res$log2FoldChange)),]
+head(res)
+
+mcols(res, use.names=TRUE)
+
+```
+
+```{r MA Plot}
+
+##Log-intensity ratios = M values, log-intensity averages = A values
+##Red points indicate padj < 0.1. 
+plotMA(res, alpha=0.1, main=sprintf(output_basename))
+```
+
+```{r FYI demonstration of independent filtering}
+
+##FYI 
+attr(res, "filterThreshold")
+
+metadata(res)$alpha
+metadata(res)$filterThreshold
+plot(metadata(res)$filterNumRej,
+     type="b", ylab="number of rejections",
+     xlab="quantiles of filter")
+lines(metadata(res)$lo.fit, col="red")
+abline(v=metadata(res)$filterTheta)
+
+```
+
+```{r Retrieving annotations for our counts data}
+
+##source("http://bioconductor.org/biocLite.R")
+##biocLite("org.Hs.eg.db")
+require(org.Hs.eg.db)
+
+key = "ENSEMBL"
+cols = c("SYMBOL", "ENTREZID", "GENENAME", "ALIAS", "REFSEQ", "ACCNUM")
+for (col in cols) {
+  # Get annotation data for column
+  annotation_data <- AnnotationDbi::select(org.Hs.eg.db, rownames(res), col, keytype=key)
+  # Collapse one-to-many relationships
+  tmp <- aggregate(annotation_data[col], by=annotation_data[key],
+                   # to a list
+                   FUN=function(x)list(x))
+  # Match on key and append to results
+  idx <- match(rownames(res), tmp[[key]])
+  res[[col]] <- tmp[idx,col]
+}
+
+head(res)
+
+```
+
+```{r Save results in a file}
+output_data <- as.data.frame(res)
+LIST_COLS <- sapply(output_data, is.list)
+for (COL in colnames(output_data)[LIST_COLS]) {
+  output_data[COL] <-
+    sapply(output_data[COL],
+           function(x)sapply(x, function(y) paste(unlist(y),
+                                                  collapse=", ") ) )
+}
+
+# Save data frame above as tab-separated file
+write.table(output_data,
+            file=file.path(output_dir, paste(output_basename,
+                                             "_results.txt", sep='')),
+            quote=FALSE, sep="\t", row.names=TRUE, col.names=NA)
+```
+
+```{r}
+sessionInfo()
+```
+
