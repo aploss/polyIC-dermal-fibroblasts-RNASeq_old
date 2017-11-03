@@ -291,13 +291,6 @@ heatmap.2(gage_mousehuman_matrix_log, key.title = "", srtCol = 45,
 ![](GAGE_pathway_enrichment_mouse_files/figure-markdown_github/heatmap-1.png)
 
 ``` r
-dev.off()
-```
-
-    ## null device 
-    ##           1
-
-``` r
 ##Here we are simply saving the heatmap to a file. Note that the only difference in the code from above is that we set the keysize = 0.99 here for aesthetics sake.
 png(file = file.path(output_dir, paste(Sys.Date(), "JMG neglog10 qvalue mice_clustered.png")), units = 'in', height = 7, width = 7, res = 300)
 heatmap.2(gage_mousehuman_matrix_log, key.title = "", keysize = 0.99, srtCol = 45, 
@@ -309,8 +302,8 @@ heatmap.2(gage_mousehuman_matrix_log, key.title = "", keysize = 0.99, srtCol = 4
 dev.off()
 ```
 
-    ## null device 
-    ##           1
+    ## quartz_off_screen 
+    ##                 2
 
 Now creating table for mouse of the DGE profile used for the GAGE analysis, i.e. na.omit() on any row where the log2FoldChange, padj, or ENTREZID are missing. Including SYMBOL as one of the columns for ease of annotating heat maps/for reference.
 
